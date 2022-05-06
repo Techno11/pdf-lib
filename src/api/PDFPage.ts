@@ -30,6 +30,7 @@ import {
   PDFPageDrawSVGOptions,
   PDFPageDrawTextOptions,
   BlendMode,
+  PDFPageDrawSVGElementOptions,
 } from 'src/api/PDFPageOptions';
 import { degrees, Rotation, toDegrees } from 'src/api/rotations';
 import { StandardFonts } from 'src/api/StandardFonts';
@@ -55,6 +56,7 @@ import {
   assertRangeOrUndefined,
   assertIsOneOfOrUndefined,
 } from 'src/utils';
+import { drawSvg } from './svg';
 
 /**
  * Represents a single page of a [[PDFDocument]].
@@ -100,7 +102,7 @@ export default class PDFPage {
   /** The document to which this page belongs. */
   readonly doc: PDFDocument;
 
-  private fontKey?: string;
+  private fontKey?: PDFName;
   private font?: PDFFont;
   private fontSize = 24;
   private fontColor = rgb(0, 0, 0) as Color;
@@ -699,8 +701,7 @@ export default class PDFPage {
     // TODO: Reuse image Font name if we've already added this image to Resources.Fonts
     assertIs(font, 'font', [[PDFFont, 'PDFFont']]);
     this.font = font;
-    this.fontKey = this.doc.context.addRandomSuffix(this.font.name);
-    this.node.setFontDictionary(PDFName.of(this.fontKey), this.font.ref);
+    this.fontKey = this.node.newFontDictionary(this.font.name, this.font.ref);
   }
 
   /**
@@ -1064,8 +1065,7 @@ export default class PDFPage {
     assertRangeOrUndefined(options.opacity, 'opacity.opacity', 0, 1);
     assertIsOneOfOrUndefined(options.blendMode, 'options.blendMode', BlendMode);
 
-    const xObjectKey = this.doc.context.addRandomSuffix('Image', 10);
-    this.node.setXObject(PDFName.of(xObjectKey), image.ref);
+    const xObjectKey = this.node.newXObject('Image', image.ref);
 
     const graphicsStateKey = this.maybeEmbedGraphicsState({
       opacity: options.opacity,
@@ -1142,8 +1142,10 @@ export default class PDFPage {
     assertRangeOrUndefined(options.opacity, 'opacity.opacity', 0, 1);
     assertIsOneOfOrUndefined(options.blendMode, 'options.blendMode', BlendMode);
 
-    const xObjectKey = this.doc.context.addRandomSuffix('EmbeddedPdfPage', 10);
-    this.node.setXObject(PDFName.of(xObjectKey), embeddedPage.ref);
+    const xObjectKey = this.node.newXObject(
+      'EmbeddedPdfPage',
+      embeddedPage.ref,
+    );
 
     const graphicsStateKey = this.maybeEmbedGraphicsState({
       opacity: options.opacity,
@@ -1152,16 +1154,16 @@ export default class PDFPage {
 
     // prettier-ignore
     const xScale = (
-        options.width  !== undefined ? options.width / embeddedPage.width
-      : options.xScale !== undefined ? options.xScale
-      : 1
+      options.width !== undefined ? options.width / embeddedPage.width
+        : options.xScale !== undefined ? options.xScale
+          : 1
     );
 
     // prettier-ignore
     const yScale = (
-        options.height !== undefined ? options.height / embeddedPage.height
-      : options.yScale !== undefined ? options.yScale
-      : 1
+      options.height !== undefined ? options.height / embeddedPage.height
+        : options.yScale !== undefined ? options.yScale
+          : 1
     );
 
     const contentStream = this.getContentStream();
@@ -1571,7 +1573,34 @@ export default class PDFPage {
     return { oldFont, oldFontKey, newFont, newFontKey };
   }
 
-  private getFont(): [PDFFont, string] {
+  /**
+   * Draw an SVG on this page. For example:
+   * ```js
+   * const svg = '<svg><path d="M 0,20 L 100,160 Q 130,200 150,120 C 190,-40 200,200 300,150 L 400,90"></path></svg>'
+   *
+   * // Draw svg
+   * page.drawSvg(svg, { x: 25, y: 75 })
+   * ```
+   * @param svg The SVG to be drawn.
+   * @param options The options to be used when drawing the SVG.
+   */
+  drawSvg(svg: string, options: PDFPageDrawSVGElementOptions = {}): void {
+    assertIs(svg, 'svg', ['string']);
+    assertOrUndefined(options.x, 'options.x', ['number']);
+    assertOrUndefined(options.y, 'options.y', ['number']);
+    assertOrUndefined(options.width, 'options.width', ['number']);
+    assertOrUndefined(options.height, 'options.height', ['number']);
+
+    drawSvg(this, svg, {
+      x: options.x ?? this.x,
+      y: options.y ?? this.y,
+      fonts: options.fonts,
+      width: options.width,
+      height: options.height,
+    });
+  }
+
+  getFont(): [PDFFont, PDFName] {
     if (!this.font || !this.fontKey) {
       const font = this.doc.embedStandardFont(StandardFonts.Helvetica);
       this.setFont(font);
@@ -1602,7 +1631,7 @@ export default class PDFPage {
     opacity?: number;
     borderOpacity?: number;
     blendMode?: BlendMode;
-  }): string | undefined {
+  }): PDFName | undefined {
     const { opacity, borderOpacity, blendMode } = options;
 
     if (
@@ -1613,8 +1642,6 @@ export default class PDFPage {
       return undefined;
     }
 
-    const key = this.doc.context.addRandomSuffix('GS', 10);
-
     const graphicsState = this.doc.context.obj({
       Type: 'ExtGState',
       ca: opacity,
@@ -1622,7 +1649,7 @@ export default class PDFPage {
       BM: blendMode,
     });
 
-    this.node.setExtGState(PDFName.of(key), graphicsState);
+    const key = this.node.newExtGState('GS', graphicsState);
 
     return key;
   }

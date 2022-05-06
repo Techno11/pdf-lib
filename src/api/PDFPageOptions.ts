@@ -165,3 +165,12 @@ export interface PDFPageDrawCircleOptions {
   blendMode?: BlendMode;
   placeBehindAll?: boolean;
 }
+
+export interface PDFPageDrawSVGElementOptions {
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+  fontSize?: number;
+  fonts?: { [fontName: string]: PDFFont };
+}
